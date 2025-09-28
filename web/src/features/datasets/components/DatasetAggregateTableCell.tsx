@@ -12,7 +12,6 @@ import {
 } from "@/src/components/ui/dialog";
 import { DialogTrigger } from "@/src/components/ui/dialog";
 import { DialogContent } from "@/src/components/ui/dialog";
-import { type RunMetrics } from "@/src/features/datasets/components/DatasetCompareRunsTable";
 import { useDatasetCompareMetrics } from "@/src/features/datasets/contexts/DatasetCompareMetricsContext";
 import { api } from "@/src/utils/api";
 import { formatIntervalSeconds } from "@/src/utils/dates";
@@ -26,31 +25,32 @@ import {
   ListCheck,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { usdFormatter } from "@/src/utils/numbers";
+import { type EnrichedDatasetRunItem } from "@langfuse/shared/src/server";
+import { decomposeAggregateScoreKey } from "@/src/features/scores/lib/aggregateScores";
 
 const DatasetAggregateCell = ({
-  scores,
-  resourceMetrics,
-  traceId,
+  value,
   projectId,
-  observationId,
   scoreKeyToDisplayName,
   actionButtons,
-  output,
+  expectedOutput: output,
   isHighlighted = false,
-}: RunMetrics & {
+}: {
   projectId: string;
+  value: EnrichedDatasetRunItem;
   scoreKeyToDisplayName: Map<string, string>;
   actionButtons?: ReactNode;
-  output?: Prisma.JsonValue;
+  expectedOutput?: Prisma.JsonValue;
   isHighlighted?: boolean;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const { selectedMetrics } = useDatasetCompareMetrics();
   // conditionally fetch the trace or observation depending on the presence of observationId
   const trace = api.traces.byId.useQuery(
-    { traceId, projectId },
+    { traceId: value.trace.id, projectId },
     {
-      enabled: observationId === undefined,
+      enabled: value.observation === undefined,
       trpc: {
         context: {
           skipBatch: true,
@@ -64,12 +64,12 @@ const DatasetAggregateCell = ({
   );
   const observation = api.observations.byId.useQuery(
     {
-      observationId: observationId as string, // disabled when observationId is undefined
+      observationId: value.observation?.id as string, // disabled when observationId is undefined
       projectId,
-      traceId,
+      traceId: value.trace.id,
     },
     {
-      enabled: observationId !== undefined,
+      enabled: value.observation !== undefined,
       trpc: {
         context: {
           skipBatch: true,
@@ -82,82 +82,96 @@ const DatasetAggregateCell = ({
     },
   );
 
-  const data = observationId === undefined ? trace.data : observation.data;
-  const scoresEntries = Object.entries(scores);
+  const data = value.observation === undefined ? trace.data : observation.data;
+
+  const scoresEntries = Object.entries(value.scores).sort(([keyA], [keyB]) => {
+    const nameA = decomposeAggregateScoreKey(keyA).name;
+    const nameB = decomposeAggregateScoreKey(keyB).name;
+    return nameA.localeCompare(nameB);
+  });
+  const latency = value.observation?.latency ?? value.trace.duration;
+  const totalCost =
+    value.observation?.calculatedTotalCost ?? value.trace.totalCost;
 
   return (
     <div
       className={cn(
-        "group relative flex h-full w-full flex-col overflow-y-auto overflow-x-hidden rounded-md",
+        "group relative flex h-full w-full flex-col overflow-hidden rounded-md",
         isHighlighted ? "border-4" : "border",
       )}
     >
       {actionButtons}
-      {selectedMetrics.includes("scores") && (
-        <div className="flex flex-shrink-0">
-          <div className="w-fit min-w-0 border-r px-1">
-            <ChartNoAxesCombined className="mt-2 h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="mt-1 w-full min-w-0 p-1">
-            <div className="flex w-full flex-wrap gap-1 overflow-hidden">
-              {scoresEntries.length > 0 ? (
-                scoresEntries.map(([key, score]) => (
-                  <Badge
-                    variant="tertiary"
-                    className="flex-wrap p-0.5 px-1 font-normal"
-                    key={key}
-                  >
-                    <span className="whitespace-nowrap capitalize">
-                      {scoreKeyToDisplayName.get(key)}:
-                    </span>
-                    <span className="ml-[2px]">
-                      <ScoresTableCell
-                        aggregate={score}
-                        showSingleValue
-                        wrap={false}
-                      />
-                    </span>
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-xs text-muted-foreground">No scores</span>
-              )}
-            </div>
-          </div>
+      <div
+        className={cn(
+          "flex max-h-[33%] flex-shrink-0 overflow-hidden",
+          !selectedMetrics.includes("scores") && "hidden",
+        )}
+      >
+        <div className="w-fit min-w-0 flex-shrink-0 border-r px-1">
+          <ChartNoAxesCombined className="mt-2 h-4 w-4 text-muted-foreground" />
         </div>
-      )}
-      {selectedMetrics.includes("resourceMetrics") && (
-        <div className="flex flex-shrink-0">
-          <div className="w-fit min-w-0 border-r px-1">
-            <GaugeCircle className="mt-1 h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="w-full min-w-0 p-1">
-            <div className="flex w-full flex-row flex-wrap gap-1">
-              {!!resourceMetrics.latency && (
-                <Badge variant="tertiary" className="p-0.5 px-1 font-normal">
-                  <ClockIcon className="mb-0.5 mr-1 h-3 w-3" />
-                  <span className="capitalize">
-                    {formatIntervalSeconds(resourceMetrics.latency)}
+        <div className="mt-1 w-full min-w-0 overflow-hidden p-1">
+          <div className="flex max-h-full w-full flex-wrap gap-1 overflow-y-auto">
+            {scoresEntries.length > 0 ? (
+              scoresEntries.map(([key, score]) => (
+                <Badge
+                  variant="tertiary"
+                  className="flex-shrink-0 flex-wrap p-0.5 px-1 font-normal"
+                  key={key}
+                >
+                  <span className="whitespace-nowrap capitalize">
+                    {scoreKeyToDisplayName.get(key)}:
+                  </span>
+                  <span className="ml-[2px]">
+                    <ScoresTableCell
+                      aggregate={score}
+                      showSingleValue
+                      wrap={false}
+                    />
                   </span>
                 </Badge>
-              )}
-              {resourceMetrics.totalCost && (
-                <Badge variant="tertiary" className="p-0.5 px-1 font-normal">
-                  <span className="mr-0.5">{resourceMetrics.totalCost}</span>
-                </Badge>
-              )}
-            </div>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">No scores</span>
+            )}
           </div>
         </div>
-      )}
-      <div className="flex min-h-0 flex-grow">
-        <div className="w-fit min-w-0 border-r px-1">
+      </div>
+      <div
+        className={cn(
+          "flex max-h-fit flex-shrink-0",
+          !selectedMetrics.includes("resourceMetrics") && "hidden",
+        )}
+      >
+        <div className="max-h-full w-fit min-w-0 flex-shrink-0 border-r px-1">
+          <GaugeCircle className="mt-1 h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="max-h-fit w-full min-w-0 p-1">
+          <div className="flex w-full flex-row flex-wrap gap-1">
+            {!!latency && (
+              <Badge variant="tertiary" className="p-0.5 px-1 font-normal">
+                <ClockIcon className="mb-0.5 mr-1 h-3 w-3" />
+                <span className="capitalize">
+                  {formatIntervalSeconds(latency)}
+                </span>
+              </Badge>
+            )}
+            {totalCost && (
+              <Badge variant="tertiary" className="p-0.5 px-1 font-normal">
+                <span className="mr-0.5">{usdFormatter(totalCost)}</span>
+              </Badge>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="w-fit min-w-0 flex-shrink-0 border-r px-1">
           <ListCheck className="mt-1 h-4 w-4 text-muted-foreground" />
         </div>
         <div className="relative w-full min-w-0 overflow-auto p-1">
           <IOTableCell
             isLoading={
-              (!!!observationId ? trace.isLoading : observation.isLoading) ||
+              (!value.observation ? trace.isLoading : observation.isLoading) ||
               !data
             }
             data={data?.output ?? "null"}
@@ -230,28 +244,30 @@ const DatasetAggregateCell = ({
   );
 };
 
-export const DatasetAggregateTableCell = ({
-  value,
-  projectId,
-  scoreKeyToDisplayName,
-  actionButtons,
-  output,
-  isHighlighted = false,
-}: {
-  value: RunMetrics;
+type DatasetAggregateTableCellProps = {
   projectId: string;
   scoreKeyToDisplayName: Map<string, string>;
+  value?: EnrichedDatasetRunItem;
   actionButtons?: ReactNode;
-  output?: Prisma.JsonValue;
+  expectedOutput?: Prisma.JsonValue;
   isHighlighted?: boolean;
-}) => {
+};
+
+export const DatasetAggregateTableCell = ({
+  projectId,
+  scoreKeyToDisplayName,
+  value,
+  actionButtons,
+  expectedOutput,
+  isHighlighted = false,
+}: DatasetAggregateTableCellProps) => {
   return value ? (
     <DatasetAggregateCell
       projectId={projectId}
-      {...value}
+      value={value}
       scoreKeyToDisplayName={scoreKeyToDisplayName}
       actionButtons={actionButtons}
-      output={output}
+      expectedOutput={expectedOutput}
       isHighlighted={isHighlighted}
     />
   ) : null;

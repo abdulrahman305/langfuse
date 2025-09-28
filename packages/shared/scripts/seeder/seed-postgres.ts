@@ -110,6 +110,9 @@ async function main() {
     },
   });
 
+  // Realistic support chat scenario
+  await createSupportChatSession(project1);
+
   await prisma.organizationMembership.upsert({
     where: {
       orgId_userId: {
@@ -533,23 +536,13 @@ export async function createDatasets(
         const datasetItem = await prisma.datasetItem.upsert({
           where: {
             id_projectId: {
-              id: generateDatasetItemId(
-                datasetName,
-                index,
-                projectId,
-                SEED_DATASETS.indexOf(data) || 0,
-              ),
+              id: generateDatasetItemId(datasetName, index, projectId),
               projectId,
             },
           },
           create: {
             projectId,
-            id: generateDatasetItemId(
-              datasetName,
-              index,
-              projectId,
-              SEED_DATASETS.indexOf(data) || 0,
-            ),
+            id: generateDatasetItemId(datasetName, index, projectId),
             datasetId: dataset.id,
             sourceTraceId: sourceTraceId ?? null,
             sourceObservationId: null,
@@ -753,7 +746,6 @@ async function generateConfigsForProject(projects: Project[]) {
     {
       name: string;
       id: string;
-      dataType: ScoreDataType;
       categories: ConfigCategory[] | null;
     }[]
   > = new Map();
@@ -781,11 +773,28 @@ async function createTraceSessions(project1: Project, project2: Project) {
   }
 }
 
+async function createSupportChatSession(project: Project) {
+  const sessionId = "support-chat-session";
+  await prisma.traceSession.upsert({
+    where: {
+      id_projectId: {
+        id: sessionId,
+        projectId: project.id,
+      },
+    },
+    create: {
+      id: sessionId,
+      projectId: project.id,
+      environment: "default",
+    },
+    update: {},
+  });
+}
+
 async function generateConfigs(project: Project) {
   const configNameAndId: {
     name: string;
     id: string;
-    dataType: ScoreDataType;
     categories: ConfigCategory[] | null;
   }[] = [];
 
@@ -847,7 +856,6 @@ async function generateConfigs(project: Project) {
     configNameAndId.push({
       name: config.name,
       id: config.id,
-      dataType: config.dataType,
       categories: config.categories ?? null,
     });
   }
@@ -862,7 +870,6 @@ async function generateQueuesForProject(
     {
       name: string;
       id: string;
-      dataType: ScoreDataType;
       categories: ConfigCategory[] | null;
     }[]
   >,
@@ -886,7 +893,6 @@ async function generateQueues(
   configIdsAndNames: {
     name: string;
     id: string;
-    dataType: ScoreDataType;
     categories: ConfigCategory[] | null;
   }[],
 ) {
