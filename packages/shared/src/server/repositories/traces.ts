@@ -697,7 +697,7 @@ export const getTraceById = async ({
     },
     existingExecution: (input) => {
       const query = `
-        SELECT 
+        SELECT
           id,
           name as name,
           user_id as user_id,
@@ -830,7 +830,6 @@ export const getTracesGroupedByName = async (
         from traces t
         WHERE t.project_id = {projectId: String}
         AND t.name IS NOT NULL
-        AND t.name != ''
         ${timestampFilterRes?.query ? `AND ${timestampFilterRes.query}` : ""}
         GROUP BY name
         ORDER BY count(*) desc
@@ -861,7 +860,6 @@ export const getTracesGroupedByName = async (
         from ${traceAmt} t
         WHERE t.project_id = {projectId: String}
         AND t.name IS NOT NULL
-        AND t.name != ''
         GROUP BY name
         ORDER BY count(*) desc
         LIMIT 1000;
